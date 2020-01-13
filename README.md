@@ -1,6 +1,6 @@
 # timecamp-website-investor
 Portal for TimeCamp investors (required by law)
 
-Build & hosted automatically using netlify.com
+Build & hosted automatically using [netlify.com](netlify.com)
 
-Site available at (https://investor.timecamp.com/)[https://investor.timecamp.com/]
+Site available at [https://investor.timecamp.com/](https://investor.timecamp.com/)
