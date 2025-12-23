@@ -6,19 +6,15 @@
     const overlayMessage = document.getElementById('overlay-message');
     const btnStart = document.getElementById('btn-start');
     const btnFocus = document.getElementById('btn-focus');
-    const savedEl = document.getElementById('stat-saved');
-    const streakEl = document.getElementById('stat-streak');
-    const livesEl = document.getElementById('stat-lives');
+
+    const budgetEl = document.getElementById('stat-budget');
+    const deadlineEl = document.getElementById('stat-deadline');
+    const hitsEl = document.getElementById('stat-hits');
     const clockEl = document.getElementById('stat-clock');
 
     if (!stage || !canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
 
-    const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
-    const lerp = (a, b, t) => a + (b - a) * t;
-    const rand = (min, max) => min + Math.random() * (max - min);
-
+    // Prefer reduced motion
     let reducedMotion = false;
     try {
         const mq = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -30,46 +26,15 @@
         }
     } catch (_) {}
 
-    // Player position:
-    // 0 = top-left, 1 = bottom-left, 2 = top-right, 3 = bottom-right
-    const state = {
-        running: false,
-        paused: false,
-        score: 0,
-        streak: 0,
-        lives: 3,
-        selected: 3,
-        lastTs: 0,
-        elapsed: 0,
-        spawnTimer: 0.7,
-        lastLane: -1,
-        tokens: [],
-        particles: [],
-        handAngle: 0,
-        handAngleTarget: 0,
-        dpr: 1,
-        w: 1,
-        h: 1,
+    const showOverlay = ({ title, message, buttonLabel }) => {
+        if (overlayTitle) overlayTitle.textContent = title;
+        if (overlayMessage) overlayMessage.textContent = message;
+        if (btnStart) btnStart.textContent = buttonLabel;
+        if (overlay) overlay.hidden = false;
     };
 
-    const posToAngles = [-Math.PI * 0.75, Math.PI * 0.75, -Math.PI * 0.25, Math.PI * 0.25];
-
-    const setSelected = (pos) => {
-        state.selected = clamp(pos | 0, 0, 3);
-        state.handAngleTarget = posToAngles[state.selected];
-    };
-
-    const formatSaved = (seconds) => {
-        if (seconds < 60) return `${seconds}s`;
-        const m = Math.floor(seconds / 60);
-        const s = seconds % 60;
-        return `${m}m ${String(s).padStart(2, '0')}s`;
-    };
-
-    const updateHud = () => {
-        if (savedEl) savedEl.textContent = formatSaved(state.score);
-        if (streakEl) streakEl.textContent = String(state.streak);
-        if (livesEl) livesEl.textContent = String(state.lives);
+    const hideOverlay = () => {
+        if (overlay) overlay.hidden = true;
     };
 
     const updateClock = () => {
@@ -83,471 +48,337 @@
     updateClock();
     setInterval(updateClock, 1000);
 
-    // Load brand icon (optional; game works without it)
-    const brandIcon = new Image();
-    brandIcon.decoding = 'async';
-    brandIcon.src = './assets/colorIcon.png';
-
-    const playShake = () => {
-        stage.classList.remove('shake');
-        // reflow
-        void stage.offsetWidth;
-        stage.classList.add('shake');
-    };
-
-    const quad = (p0, p1, p2, t) => {
-        const u = 1 - t;
-        const x = u * u * p0.x + 2 * u * t * p1.x + t * t * p2.x;
-        const y = u * u * p0.y + 2 * u * t * p1.y + t * t * p2.y;
-        return { x, y };
-    };
-
-    const makeLanes = (w, h) => {
-        // Normalized control points for four curved "time rails"
-        const lanesN = [
-            { p0: { x: 0.14, y: 0.18 }, p1: { x: 0.30, y: 0.14 }, p2: { x: 0.40, y: 0.34 } }, // TL
-            { p0: { x: 0.14, y: 0.82 }, p1: { x: 0.30, y: 0.86 }, p2: { x: 0.40, y: 0.66 } }, // BL
-            { p0: { x: 0.86, y: 0.18 }, p1: { x: 0.70, y: 0.14 }, p2: { x: 0.60, y: 0.34 } }, // TR
-            { p0: { x: 0.86, y: 0.82 }, p1: { x: 0.70, y: 0.86 }, p2: { x: 0.60, y: 0.66 } }, // BR
-        ];
-
-        return lanesN.map((ln) => ({
-            p0: { x: ln.p0.x * w, y: ln.p0.y * h },
-            p1: { x: ln.p1.x * w, y: ln.p1.y * h },
-            p2: { x: ln.p2.x * w, y: ln.p2.y * h },
-        }));
-    };
-
-    const tokenLabel = () => {
-        const d = new Date();
-        const s = d.getSeconds();
-        const n = (s + Math.floor(Math.random() * 12)) % 60;
-        return String(n).padStart(2, '0');
-    };
-
-    const spawnToken = () => {
-        const difficulty = 1 + state.score * 0.035;
-        const minInterval = 0.34;
-        const maxInterval = 1.05;
-        const interval = clamp(maxInterval / difficulty, minInterval, maxInterval);
-        state.spawnTimer = rand(interval * 0.75, interval * 1.1);
-
-        let lane = Math.floor(Math.random() * 4);
-        if (lane === state.lastLane && Math.random() < 0.65) lane = (lane + 1 + Math.floor(Math.random() * 3)) % 4;
-        state.lastLane = lane;
-
-        const speed = clamp(0.62 + state.score * 0.01 + rand(-0.08, 0.08), 0.55, 1.45);
-        state.tokens.push({
-            lane,
-            t: 0,
-            speed,
-            label: tokenLabel(),
-            wobble: rand(0, Math.PI * 2),
-        });
-    };
-
-    const burst = (x, y, color, power = 1) => {
-        const count = 10 + Math.floor(8 * power);
-        for (let i = 0; i < count; i++) {
-            const a = rand(0, Math.PI * 2);
-            const sp = rand(30, 140) * power;
-            state.particles.push({
-                x,
-                y,
-                vx: Math.cos(a) * sp,
-                vy: Math.sin(a) * sp,
-                life: rand(0.4, 0.8),
-                maxLife: 1,
-                r: rand(1.6, 3.2),
-                color,
-            });
+    // Three.js / WebGL guards
+    const webglAvailable = () => {
+        try {
+            const testCanvas = document.createElement('canvas');
+            const gl = testCanvas.getContext('webgl') || testCanvas.getContext('experimental-webgl');
+            return !!gl && typeof WebGLRenderingContext !== 'undefined';
+        } catch (_) {
+            return false;
         }
     };
 
-    const reset = () => {
-        state.running = true;
-        state.paused = false;
-        state.score = 0;
-        state.streak = 0;
-        state.lives = 3;
-        state.tokens = [];
-        state.particles = [];
-        state.elapsed = 0;
-        state.spawnTimer = 0.6;
-        state.lastLane = -1;
-        state.lastTs = 0;
-        setSelected(3);
-        updateHud();
-    };
-
-    const showOverlay = ({ title, message, buttonLabel }) => {
-        if (overlayTitle) overlayTitle.textContent = title;
-        if (overlayMessage) overlayMessage.textContent = message;
-        if (btnStart) btnStart.textContent = buttonLabel;
-        if (overlay) overlay.hidden = false;
-    };
-
-    const hideOverlay = () => {
-        if (overlay) overlay.hidden = true;
-    };
-
-    const togglePause = () => {
-        if (!state.running) return;
-        state.paused = !state.paused;
-        if (state.paused) {
-            showOverlay({
-                title: 'Paused',
-                message: 'Press Space to resume.',
-                buttonLabel: 'Resume',
-            });
-        } else {
-            hideOverlay();
-        }
-    };
-
-    const endGame = () => {
-        state.running = false;
-        state.paused = false;
+    if (!window.THREE || !webglAvailable()) {
         showOverlay({
-            title: 'Out of time',
-            message: `You saved ${formatSaved(state.score)}. Press Start to play again.`,
-            buttonLabel: 'Play again',
+            title: '3D unavailable',
+            message: 'Your browser has WebGL disabled, so the 3D game cannot start.',
+            buttonLabel: 'OK',
         });
+        if (btnStart) btnStart.disabled = true;
+        return;
+    }
+
+    const THREE = window.THREE;
+
+    const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+    const lerp = (a, b, t) => a + (b - a) * t;
+    const rand = (min, max) => min + Math.random() * (max - min);
+
+    // Game constants
+    const START_BUDGET = 30; // seconds
+    const BUDGET_DRAIN_PER_SEC = 1.0;
+    const CLOCK_PICKUP_BONUS = 6; // seconds
+    const HIT_PENALTY = 8; // seconds
+    const GOAL_DISTANCE = 900; // arbitrary units to reach "Project Deadline"
+
+    // Lanes (4 corners inside tunnel)
+    const laneR = 1.55;
+    const lanes = [
+        { x: -laneR, y: laneR }, // TL
+        { x: -laneR, y: -laneR }, // BL
+        { x: laneR, y: laneR }, // TR
+        { x: laneR, y: -laneR }, // BR
+    ];
+
+    const state = {
+        running: false,
+        paused: false,
+        budget: START_BUDGET,
+        hits: 0,
+        distance: 0,
+        speed: 22, // units/sec (world objects move toward camera)
+        speedTarget: 22,
+        lane: 3,
+        laneTarget: 3,
+        lastTs: 0,
+        spawnObstacleT: 0.9,
+        spawnPickupT: 0.8,
+        objects: [],
+        pickups: [],
+        effects: [],
+        cameraShake: 0,
     };
 
-    const resize = () => {
-        const rect = stage.getBoundingClientRect();
-        state.w = Math.max(1, Math.floor(rect.width));
-        state.h = Math.max(1, Math.floor(rect.height));
-        state.dpr = Math.min(window.devicePixelRatio || 1, 2);
-        canvas.width = Math.floor(state.w * state.dpr);
-        canvas.height = Math.floor(state.h * state.dpr);
-        ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
-    };
-
-    const ro = new ResizeObserver(resize);
-    ro.observe(stage);
-    window.addEventListener('resize', resize, { passive: true });
-    resize();
-
-    const drawBackground = (w, h, t) => {
-        const tm = reducedMotion ? 0 : t;
-        // Subtle grid + vignette
-        ctx.clearRect(0, 0, w, h);
-
-        const g = ctx.createLinearGradient(0, 0, 0, h);
-        g.addColorStop(0, 'rgba(255, 255, 255, 0.11)');
-        g.addColorStop(1, 'rgba(255, 255, 255, 0.03)');
-        ctx.fillStyle = g;
-        ctx.fillRect(0, 0, w, h);
-
-        // Grid
-        const spacing = Math.max(26, Math.floor(Math.min(w, h) * 0.06));
-        ctx.globalAlpha = 0.10;
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 1;
-        for (let x = 0; x < w + spacing; x += spacing) {
-            ctx.beginPath();
-            ctx.moveTo(x + (tm * 14) % spacing, 0);
-            ctx.lineTo(x + (tm * 14) % spacing, h);
-            ctx.stroke();
-        }
-        for (let y = 0; y < h + spacing; y += spacing) {
-            ctx.beginPath();
-            ctx.moveTo(0, y - (tm * 12) % spacing);
-            ctx.lineTo(w, y - (tm * 12) % spacing);
-            ctx.stroke();
-        }
-        ctx.globalAlpha = 1;
-
-        // Vignette
-        const vg = ctx.createRadialGradient(w * 0.5, h * 0.5, Math.min(w, h) * 0.05, w * 0.5, h * 0.5, Math.max(w, h) * 0.65);
-        vg.addColorStop(0, 'rgba(0, 0, 0, 0.0)');
-        vg.addColorStop(1, 'rgba(0, 0, 0, 0.25)');
-        ctx.fillStyle = vg;
-        ctx.fillRect(0, 0, w, h);
-    };
-
-    const drawLanes = (lanes) => {
-        // Glow underlay
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-
-        for (let i = 0; i < lanes.length; i++) {
-            const ln = lanes[i];
-            ctx.globalAlpha = 0.18;
-            ctx.strokeStyle = i === state.selected ? '#55b761' : '#ffffff';
-            ctx.lineWidth = 10;
-            ctx.beginPath();
-            ctx.moveTo(ln.p0.x, ln.p0.y);
-            ctx.quadraticCurveTo(ln.p1.x, ln.p1.y, ln.p2.x, ln.p2.y);
-            ctx.stroke();
-        }
-
-        for (let i = 0; i < lanes.length; i++) {
-            const ln = lanes[i];
-            ctx.globalAlpha = 0.35;
-            ctx.strokeStyle = i === state.selected ? '#55b761' : 'rgba(255,255,255,0.75)';
-            ctx.lineWidth = 3;
-            ctx.beginPath();
-            ctx.moveTo(ln.p0.x, ln.p0.y);
-            ctx.quadraticCurveTo(ln.p1.x, ln.p1.y, ln.p2.x, ln.p2.y);
-            ctx.stroke();
-        }
-        ctx.globalAlpha = 1;
-
-        // End "catch" markers
-        for (let i = 0; i < lanes.length; i++) {
-            const p = lanes[i].p2;
-            ctx.globalAlpha = 0.9;
-            ctx.fillStyle = i === state.selected ? 'rgba(85,183,97,0.85)' : 'rgba(255,255,255,0.55)';
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, 7.5, 0, Math.PI * 2);
-            ctx.fill();
-        }
-        ctx.globalAlpha = 1;
-    };
-
-    const drawClock = (cx, cy, r, t) => {
-        const tm = reducedMotion ? 0 : t;
-        // Outer ring
-        ctx.globalAlpha = 0.95;
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.65)';
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.20)';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(cx, cy, r + 10, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-
-        // Inner face
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.10)';
-        ctx.beginPath();
-        ctx.arc(cx, cy, r, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Ticks
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.40)';
-        for (let i = 0; i < 12; i++) {
-            const a = (i / 12) * Math.PI * 2 + tm * 0.15;
-            const x0 = cx + Math.cos(a) * (r - 4);
-            const y0 = cy + Math.sin(a) * (r - 4);
-            const x1 = cx + Math.cos(a) * (r - 14);
-            const y1 = cy + Math.sin(a) * (r - 14);
-            ctx.lineWidth = i % 3 === 0 ? 3 : 2;
-            ctx.beginPath();
-            ctx.moveTo(x0, y0);
-            ctx.lineTo(x1, y1);
-            ctx.stroke();
-        }
-
-        // Center cap
-        ctx.fillStyle = 'rgba(85,183,97,0.95)';
-        ctx.beginPath();
-        ctx.arc(cx, cy, 5.5, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-    };
-
-    const drawHand = (cx, cy, r) => {
-        state.handAngle = lerp(state.handAngle, state.handAngleTarget, reducedMotion ? 1 : 0.18);
-        const a = state.handAngle;
-        const hx = cx + Math.cos(a) * (r + 22);
-        const hy = cy + Math.sin(a) * (r + 22);
-
-        ctx.lineCap = 'round';
-        ctx.globalAlpha = 0.95;
-        ctx.strokeStyle = 'rgba(85,183,97,0.9)';
-        ctx.lineWidth = 10;
-        ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(hx, hy);
-        ctx.stroke();
-
-        ctx.strokeStyle = 'rgba(255,255,255,0.62)';
-        ctx.lineWidth = 4;
-        ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(hx, hy);
-        ctx.stroke();
-
-        // Catch hook
-        ctx.globalAlpha = 0.95;
-        ctx.strokeStyle = 'rgba(255,255,255,0.92)';
-        ctx.lineWidth = 4;
-        ctx.beginPath();
-        ctx.arc(hx, hy, 10, a - Math.PI * 0.65, a + Math.PI * 0.65);
-        ctx.stroke();
-        ctx.globalAlpha = 1;
-    };
-
-    const drawToken = (x, y, r, label, wobbleT) => {
-        // Outer
-        const glow = ctx.createRadialGradient(x, y, r * 0.2, x, y, r * 1.8);
-        glow.addColorStop(0, 'rgba(85,183,97,0.35)');
-        glow.addColorStop(1, 'rgba(85,183,97,0.0)');
-        ctx.fillStyle = glow;
-        ctx.beginPath();
-        ctx.arc(x, y, r * 1.7, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.fillStyle = 'rgba(255,255,255,0.92)';
-        ctx.strokeStyle = 'rgba(15, 23, 42, 0.40)';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(x, y, r, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-
-        // Tiny clock hands
-        const a0 = wobbleT;
-        const a1 = wobbleT * 2.2 + 1.2;
-        ctx.strokeStyle = 'rgba(15, 23, 42, 0.65)';
-        ctx.lineCap = 'round';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(x, y);
-        ctx.lineTo(x + Math.cos(a0) * r * 0.55, y + Math.sin(a0) * r * 0.55);
-        ctx.stroke();
-        ctx.lineWidth = 2.5;
-        ctx.beginPath();
-        ctx.moveTo(x, y);
-        ctx.lineTo(x + Math.cos(a1) * r * 0.32, y + Math.sin(a1) * r * 0.32);
-        ctx.stroke();
-
-        // Label (seconds)
-        ctx.fillStyle = 'rgba(15, 23, 42, 0.78)';
-        ctx.font = `800 ${Math.max(10, Math.floor(r * 0.9))}px -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Arial, sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(label, x, y + r * 0.05);
-    };
-
-    const drawParticles = (dt) => {
-        for (let i = state.particles.length - 1; i >= 0; i--) {
-            const p = state.particles[i];
-            p.life -= dt;
-            if (p.life <= 0) {
-                state.particles.splice(i, 1);
-                continue;
-            }
-            p.vy += 240 * dt;
-            p.x += p.vx * dt;
-            p.y += p.vy * dt;
-            p.vx *= 0.98;
-            p.vy *= 0.98;
-
-            const a = clamp(p.life / 0.8, 0, 1);
-            ctx.globalAlpha = a;
-            ctx.fillStyle = p.color;
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-            ctx.fill();
-        }
-        ctx.globalAlpha = 1;
-    };
-
-    const step = (dt) => {
-        state.elapsed += dt;
-
-        // Spawn
-        state.spawnTimer -= dt;
-        if (state.spawnTimer <= 0) spawnToken();
-
-        // Update tokens
-        const lanes = makeLanes(state.w, state.h);
-        for (let i = state.tokens.length - 1; i >= 0; i--) {
-            const tk = state.tokens[i];
-            tk.t += dt * tk.speed;
-            tk.wobble += dt * (reducedMotion ? 0 : 2.4);
-
-            if (tk.t >= 1) {
-                const end = lanes[tk.lane].p2;
-                if (tk.lane === state.selected) {
-                    // Caught
-                    state.tokens.splice(i, 1);
-                    state.score += 1;
-                    state.streak += 1;
-                    burst(end.x, end.y, 'rgba(85,183,97,0.95)', 1);
-                    updateHud();
-                } else {
-                    // Missed
-                    state.tokens.splice(i, 1);
-                    state.lives -= 1;
-                    state.streak = 0;
-                    burst(end.x, end.y, 'rgba(255,255,255,0.75)', 0.9);
-                    playShake();
-                    updateHud();
-                    if (state.lives <= 0) endGame();
-                }
-            }
+    const hud = () => {
+        if (budgetEl) budgetEl.textContent = `${Math.max(0, Math.ceil(state.budget))}s`;
+        if (hitsEl) hitsEl.textContent = String(state.hits);
+        if (deadlineEl) {
+            const pct = clamp((state.distance / GOAL_DISTANCE) * 100, 0, 100);
+            deadlineEl.textContent = `${Math.floor(pct)}%`;
         }
     };
+    hud();
 
-    const draw = (dt) => {
-        const w = state.w;
-        const h = state.h;
-        const t = state.elapsed;
-        const lanes = makeLanes(w, h);
+    // ---- Scene setup ----
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x0b1220, 0.035);
 
-        drawBackground(w, h, t);
-        drawLanes(lanes);
+    const camera = new THREE.PerspectiveCamera(58, 1, 0.1, 240);
+    camera.position.set(0, 0.35, 6.4);
+    camera.lookAt(0, 0, -18);
 
-        const cx = w * 0.5;
-        const cy = h * 0.5;
-        const clockR = Math.min(w, h) * 0.11;
+    const renderer = new THREE.WebGLRenderer({
+        canvas,
+        antialias: true,
+        alpha: true,
+        powerPreference: 'high-performance',
+    });
+    renderer.setClearColor(0x000000, 0);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
 
-        // Tokens under the hand for depth
-        for (const tk of state.tokens) {
-            const ln = lanes[tk.lane];
-            const p = quad(ln.p0, ln.p1, ln.p2, tk.t);
-            const r = clamp(Math.min(w, h) * 0.028, 10, 18);
-            drawToken(p.x, p.y, r, tk.label, tk.wobble);
+    // Lights (dynamic)
+    scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+    const key = new THREE.DirectionalLight(0xffffff, 0.75);
+    key.position.set(2.2, 3.5, 5.5);
+    scene.add(key);
+    const runLight = new THREE.PointLight(0x55b761, 1.1, 30, 2.0);
+    runLight.position.set(0, 0, 1.5);
+    scene.add(runLight);
+
+    const pulseLight = new THREE.PointLight(0x55b761, 0.7, 45, 2.0);
+    pulseLight.position.set(0, 0, -28);
+    scene.add(pulseLight);
+
+    // Tunnel texture (procedural)
+    const makeTunnelTexture = () => {
+        const c = document.createElement('canvas');
+        c.width = 256;
+        c.height = 256;
+        const g = c.getContext('2d');
+        if (!g) return null;
+
+        g.clearRect(0, 0, 256, 256);
+        g.fillStyle = '#0b1220';
+        g.fillRect(0, 0, 256, 256);
+
+        // Rings
+        for (let y = 0; y < 256; y += 32) {
+            g.globalAlpha = 0.35;
+            g.fillStyle = '#55b761';
+            g.fillRect(0, y, 256, 1);
+            g.globalAlpha = 0.12;
+            g.fillStyle = '#ffffff';
+            g.fillRect(0, y + 2, 256, 1);
         }
 
-        drawClock(cx, cy, clockR, t);
-        drawHand(cx, cy, clockR);
-
-        // Tiny brand mark in the center (optional)
-        if (brandIcon.complete && brandIcon.naturalWidth > 0) {
-            const iw = clockR * 1.1;
-            const ih = clockR * 1.1;
-            ctx.globalAlpha = 0.9;
-            ctx.drawImage(brandIcon, cx - iw / 2, cy - ih / 2, iw, ih);
-            ctx.globalAlpha = 1;
+        // Subtle diagonal "time streaks"
+        g.globalAlpha = 0.16;
+        g.strokeStyle = '#ffffff';
+        g.lineWidth = 2;
+        for (let i = -256; i < 256; i += 42) {
+            g.beginPath();
+            g.moveTo(i, 256);
+            g.lineTo(i + 256, 0);
+            g.stroke();
         }
+        g.globalAlpha = 1;
 
-        drawParticles(dt);
-
-        // Pause badge (when overlay hidden but paused due to visibility)
-        if (state.running && state.paused && overlay && overlay.hidden) {
-            ctx.globalAlpha = 0.8;
-            ctx.fillStyle = 'rgba(15, 23, 42, 0.55)';
-            ctx.strokeStyle = 'rgba(255,255,255,0.18)';
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            const bw = 130;
-            const bh = 36;
-            const x = w - bw - 16;
-            const y = 16;
-            ctx.roundRect(x, y, bw, bh, 12);
-            ctx.fill();
-            ctx.stroke();
-            ctx.fillStyle = 'rgba(255,255,255,0.85)';
-            ctx.font = '700 13px -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Arial, sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText('Paused', x + bw / 2, y + bh / 2);
-            ctx.globalAlpha = 1;
-        }
+        const tex = new THREE.CanvasTexture(c);
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.repeat.set(6, 24);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.anisotropy = 8;
+        return tex;
     };
 
-    // Polyfill for roundRect (Safari older)
-    if (!CanvasRenderingContext2D.prototype.roundRect) {
+    const tunnelTex = makeTunnelTexture();
+    const tunnelMat = new THREE.MeshStandardMaterial({
+        color: 0x0b1220,
+        map: tunnelTex || null,
+        emissive: new THREE.Color('#55b761'),
+        emissiveIntensity: 0.35,
+        roughness: 0.85,
+        metalness: 0.1,
+        side: THREE.BackSide,
+    });
+
+    const tunnelGeo = new THREE.CylinderGeometry(5.6, 5.6, 140, 48, 64, true);
+    tunnelGeo.rotateX(Math.PI / 2);
+    const tunnel = new THREE.Mesh(tunnelGeo, tunnelMat);
+    tunnel.position.z = -52;
+    scene.add(tunnel);
+
+    // Particles for speed
+    const makeParticles = () => {
+        const count = 850;
+        const positions = new Float32Array(count * 3);
+        for (let i = 0; i < count; i++) {
+            const a = Math.random() * Math.PI * 2;
+            const r = rand(0.4, 5.0);
+            positions[i * 3 + 0] = Math.cos(a) * r;
+            positions[i * 3 + 1] = Math.sin(a) * r;
+            positions[i * 3 + 2] = rand(-120, 8);
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        const mat = new THREE.PointsMaterial({
+            size: 0.035,
+            color: 0xffffff,
+            transparent: true,
+            opacity: 0.55,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+        });
+        const pts = new THREE.Points(geo, mat);
+        pts.userData = { positions, count };
+        return pts;
+    };
+    const particles = makeParticles();
+    particles.position.z = 0;
+    scene.add(particles);
+
+    // Focus sphere
+    const sphereGeo = new THREE.SphereGeometry(0.33, 32, 32);
+    const sphereMat = new THREE.MeshPhysicalMaterial({
+        color: 0x55b761,
+        roughness: 0.18,
+        metalness: 0.05,
+        clearcoat: 0.9,
+        clearcoatRoughness: 0.2,
+        emissive: new THREE.Color('#0b3d1b'),
+        emissiveIntensity: 0.22,
+    });
+    const focusSphere = new THREE.Mesh(sphereGeo, sphereMat);
+    focusSphere.position.set(lanes[state.lane].x, lanes[state.lane].y, 0.9);
+    scene.add(focusSphere);
+
+    const focusGlow = new THREE.PointLight(0x55b761, 0.85, 8, 2.0);
+    focusGlow.position.set(0, 0, 0.9);
+    scene.add(focusGlow);
+
+    // Icon textures (procedural) - we avoid trademarked logos; these are generic "distraction" symbols.
+    const makeIconTexture = (type) => {
+        const c = document.createElement('canvas');
+        c.width = 256;
+        c.height = 256;
+        const g = c.getContext('2d');
+        if (!g) return null;
+
+        g.clearRect(0, 0, 256, 256);
+
+        // background glow
+        const bg = g.createRadialGradient(128, 96, 18, 128, 128, 130);
+        bg.addColorStop(0, 'rgba(255,255,255,0.25)');
+        bg.addColorStop(1, 'rgba(255,255,255,0.0)');
+        g.fillStyle = bg;
+        g.beginPath();
+        g.arc(128, 128, 120, 0, Math.PI * 2);
+        g.fill();
+
+        const drawBadge = (accent) => {
+            g.fillStyle = 'rgba(15, 23, 42, 0.65)';
+            g.strokeStyle = 'rgba(255,255,255,0.25)';
+            g.lineWidth = 6;
+            g.beginPath();
+            g.arc(128, 128, 96, 0, Math.PI * 2);
+            g.fill();
+            g.stroke();
+
+            g.strokeStyle = accent;
+            g.globalAlpha = 0.85;
+            g.lineWidth = 6;
+            g.beginPath();
+            g.arc(128, 128, 78, 0, Math.PI * 2);
+            g.stroke();
+            g.globalAlpha = 1;
+        };
+
+        if (type === 'clock') {
+            drawBadge('rgba(85,183,97,0.95)');
+            g.strokeStyle = 'rgba(255,255,255,0.92)';
+            g.lineWidth = 8;
+            g.beginPath();
+            g.arc(128, 128, 58, 0, Math.PI * 2);
+            g.stroke();
+
+            // hands
+            g.lineCap = 'round';
+            g.strokeStyle = 'rgba(85,183,97,0.95)';
+            g.lineWidth = 10;
+            g.beginPath();
+            g.moveTo(128, 128);
+            g.lineTo(128, 92);
+            g.stroke();
+            g.strokeStyle = 'rgba(255,255,255,0.85)';
+            g.lineWidth = 7;
+            g.beginPath();
+            g.moveTo(128, 128);
+            g.lineTo(162, 132);
+            g.stroke();
+        } else if (type === 'social') {
+            drawBadge('rgba(147,197,253,0.95)');
+            // chat bubbles
+            g.fillStyle = 'rgba(255,255,255,0.92)';
+            g.beginPath();
+            g.roundRect(62, 86, 132, 70, 18);
+            g.fill();
+            g.beginPath();
+            g.moveTo(98, 156);
+            g.lineTo(86, 178);
+            g.lineTo(122, 156);
+            g.closePath();
+            g.fill();
+            g.fillStyle = 'rgba(15,23,42,0.65)';
+            g.roundRect(88, 108, 84, 10, 5);
+            g.roundRect(88, 128, 56, 10, 5);
+            g.fill();
+        } else if (type === 'email') {
+            drawBadge('rgba(253,224,71,0.95)');
+            // envelope
+            g.fillStyle = 'rgba(255,255,255,0.92)';
+            g.roundRect(66, 92, 124, 88, 14);
+            g.fill();
+            g.strokeStyle = 'rgba(15,23,42,0.55)';
+            g.lineWidth = 6;
+            g.beginPath();
+            g.moveTo(72, 102);
+            g.lineTo(128, 146);
+            g.lineTo(184, 102);
+            g.stroke();
+        } else if (type === 'meeting') {
+            drawBadge('rgba(251,113,133,0.95)');
+            // calendar
+            g.fillStyle = 'rgba(255,255,255,0.92)';
+            g.roundRect(74, 86, 108, 100, 16);
+            g.fill();
+            g.fillStyle = 'rgba(15,23,42,0.62)';
+            g.roundRect(88, 112, 80, 12, 6);
+            g.roundRect(88, 136, 64, 12, 6);
+            g.roundRect(88, 160, 52, 12, 6);
+            g.fill();
+            g.fillStyle = 'rgba(251,113,133,0.95)';
+            g.roundRect(74, 86, 108, 20, 12);
+            g.fill();
+        }
+
+        const tex = new THREE.CanvasTexture(c);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.anisotropy = 8;
+        return tex;
+    };
+
+    // roundRect polyfill for older browsers (for icon drawing only)
+    if (CanvasRenderingContext2D && !CanvasRenderingContext2D.prototype.roundRect) {
         // eslint-disable-next-line no-extend-native
         CanvasRenderingContext2D.prototype.roundRect = function (x, y, w, h, r) {
             const rr = Array.isArray(r) ? r : [r, r, r, r];
-            const [r1, r2, r3, r4] = rr.map((v) => clamp(v, 0, Math.min(w, h) / 2));
+            const r1 = rr[0] || 0;
+            const r2 = rr[1] || r1;
+            const r3 = rr[2] || r1;
+            const r4 = rr[3] || r2;
             this.beginPath();
             this.moveTo(x + r1, y);
             this.lineTo(x + w - r2, y);
@@ -563,17 +394,219 @@
         };
     }
 
-    const loop = (ts) => {
-        if (!state.lastTs) state.lastTs = ts;
-        const rawDt = (ts - state.lastTs) / 1000;
-        state.lastTs = ts;
-        const dt = clamp(rawDt, 0, 0.05);
+    const texClock = makeIconTexture('clock');
+    const texSocial = makeIconTexture('social');
+    const texEmail = makeIconTexture('email');
+    const texMeeting = makeIconTexture('meeting');
 
-        if (state.running && !state.paused) step(dt);
-        draw(dt);
-        requestAnimationFrame(loop);
+    const spriteMat = (tex, tint = 0xffffff) =>
+        new THREE.SpriteMaterial({
+            map: tex || null,
+            color: tint,
+            transparent: true,
+            depthWrite: false,
+        });
+
+    const obstacleMats = [spriteMat(texSocial), spriteMat(texEmail), spriteMat(texMeeting)];
+    const pickupMat = spriteMat(texClock, 0xffffff);
+
+    const spawnSprite = ({ lane, z, mat, scale, kind }) => {
+        const sp = new THREE.Sprite(mat);
+        sp.position.set(lanes[lane].x, lanes[lane].y, z);
+        sp.scale.setScalar(scale);
+        sp.userData = { lane, z, kind, hit: false };
+        scene.add(sp);
+        return sp;
     };
 
+    const spawnObstacle = () => {
+        state.spawnObstacleT = rand(0.55, 1.05) / (1 + state.distance / GOAL_DISTANCE);
+        const lane = Math.floor(Math.random() * 4);
+        const kind = ['social', 'email', 'meeting'][Math.floor(Math.random() * 3)];
+        const mat = obstacleMats[kind === 'social' ? 0 : kind === 'email' ? 1 : 2];
+        const scale = 1.15;
+        const sp = spawnSprite({ lane, z: -92, mat, scale, kind });
+        state.objects.push(sp);
+    };
+
+    const spawnPickup = () => {
+        state.spawnPickupT = rand(0.65, 1.35);
+        const lane = Math.floor(Math.random() * 4);
+        const sp = spawnSprite({ lane, z: -85, mat: pickupMat, scale: 1.0, kind: 'clock' });
+        state.pickups.push(sp);
+    };
+
+    // Deadline gate
+    const gateGroup = new THREE.Group();
+    const gateMat = new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        roughness: 0.35,
+        metalness: 0.2,
+        emissive: new THREE.Color('#ff3b5c'),
+        emissiveIntensity: 0.35,
+        transparent: true,
+        opacity: 0.9,
+    });
+    const gateGeo = new THREE.TorusGeometry(3.7, 0.12, 18, 96);
+    const gate = new THREE.Mesh(gateGeo, gateMat);
+    gate.rotation.x = Math.PI / 2;
+    gate.position.set(0, 0, -120);
+    gateGroup.add(gate);
+    gateGroup.visible = false;
+    scene.add(gateGroup);
+
+    const playShake = (amount = 1) => {
+        stage.classList.remove('shake');
+        void stage.offsetWidth;
+        stage.classList.add('shake');
+        state.cameraShake = Math.max(state.cameraShake, amount);
+    };
+
+    const reset = () => {
+        state.running = true;
+        state.paused = false;
+        state.budget = START_BUDGET;
+        state.hits = 0;
+        state.distance = 0;
+        state.speed = 22;
+        state.speedTarget = 22;
+        state.lane = 3;
+        state.laneTarget = 3;
+        state.spawnObstacleT = 0.7;
+        state.spawnPickupT = 0.7;
+        state.cameraShake = 0;
+
+        // cleanup
+        for (const o of state.objects) scene.remove(o);
+        for (const p of state.pickups) scene.remove(p);
+        state.objects = [];
+        state.pickups = [];
+
+        focusSphere.position.set(lanes[state.lane].x, lanes[state.lane].y, 0.9);
+        focusGlow.position.copy(focusSphere.position);
+        gateGroup.visible = false;
+        hud();
+    };
+
+    const win = () => {
+        state.running = false;
+        state.paused = false;
+        showOverlay({
+            title: 'Deadline reached',
+            message: `Nice — you made it to the Project Deadline with ${Math.ceil(state.budget)}s left.`,
+            buttonLabel: 'Play again',
+        });
+    };
+
+    const lose = () => {
+        state.running = false;
+        state.paused = false;
+        showOverlay({
+            title: 'Out of budget',
+            message: 'Distractions stole your time. Collect clocks and try again.',
+            buttonLabel: 'Play again',
+        });
+    };
+
+    const togglePause = () => {
+        if (!state.running) return;
+        state.paused = !state.paused;
+        if (state.paused) {
+            showOverlay({ title: 'Paused', message: 'Press Space to resume.', buttonLabel: 'Resume' });
+        } else {
+            hideOverlay();
+        }
+    };
+
+    const setLane = (lane) => {
+        state.laneTarget = clamp(lane | 0, 0, 3);
+    };
+
+    // Resize handling
+    const resize = () => {
+        const rect = stage.getBoundingClientRect();
+        const w = Math.max(1, Math.floor(rect.width));
+        const h = Math.max(1, Math.floor(rect.height));
+        renderer.setSize(w, h, false);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+    };
+    const ro = new ResizeObserver(resize);
+    ro.observe(stage);
+    window.addEventListener('resize', resize, { passive: true });
+    resize();
+
+    // Input
+    window.addEventListener(
+        'keydown',
+        (e) => {
+            if (e.key === ' ' || e.code === 'Space') {
+                e.preventDefault();
+                if (overlay && !overlay.hidden) {
+                    startOrResume();
+                } else {
+                    togglePause();
+                }
+                return;
+            }
+            if (e.key === 'Enter' && overlay && !overlay.hidden) {
+                startOrResume();
+                return;
+            }
+
+            if (e.key === 'ArrowLeft') {
+                setLane(state.laneTarget === 2 ? 0 : state.laneTarget === 3 ? 1 : state.laneTarget);
+            } else if (e.key === 'ArrowRight') {
+                setLane(state.laneTarget === 0 ? 2 : state.laneTarget === 1 ? 3 : state.laneTarget);
+            } else if (e.key === 'ArrowUp') {
+                setLane(state.laneTarget === 1 ? 0 : state.laneTarget === 3 ? 2 : state.laneTarget);
+            } else if (e.key === 'ArrowDown') {
+                setLane(state.laneTarget === 0 ? 1 : state.laneTarget === 2 ? 3 : state.laneTarget);
+            }
+        },
+        { passive: false },
+    );
+
+    stage.addEventListener(
+        'pointerdown',
+        (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            const left = x < rect.width / 2;
+            const top = y < rect.height / 2;
+            const lane = left ? (top ? 0 : 1) : top ? 2 : 3;
+            setLane(lane);
+            if (overlay && !overlay.hidden && e.pointerType !== 'mouse') startOrResume();
+        },
+        { passive: true },
+    );
+
+    stage.querySelectorAll('[data-pos]').forEach((btn) => {
+        btn.addEventListener(
+            'click',
+            (e) => {
+                const lane = Number(e.currentTarget.getAttribute('data-pos'));
+                if (!Number.isNaN(lane)) setLane(lane);
+                if (overlay && !overlay.hidden) startOrResume();
+            },
+            { passive: true },
+        );
+    });
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden && state.running) {
+            state.paused = true;
+            showOverlay({
+                title: 'Paused',
+                message: 'You switched tabs. Press Space to resume.',
+                buttonLabel: 'Resume',
+            });
+        }
+    });
+
+    // Overlay buttons
     const startOrResume = () => {
         if (!state.running) {
             reset();
@@ -587,90 +620,8 @@
         }
     };
 
-    // Input: keyboard
-    window.addEventListener(
-        'keydown',
-        (e) => {
-            if (e.key === ' ' || e.code === 'Space') {
-                e.preventDefault();
-                if (overlay && !overlay.hidden) {
-                    startOrResume();
-                } else {
-                    togglePause();
-                }
-                return;
-            }
-
-            if (e.key === 'Enter' && overlay && !overlay.hidden) {
-                startOrResume();
-                return;
-            }
-
-            if (e.key === 'ArrowLeft') {
-                // Switch to left side, keep vertical
-                setSelected(state.selected === 2 ? 0 : state.selected === 3 ? 1 : state.selected);
-            } else if (e.key === 'ArrowRight') {
-                setSelected(state.selected === 0 ? 2 : state.selected === 1 ? 3 : state.selected);
-            } else if (e.key === 'ArrowUp') {
-                setSelected(state.selected === 1 ? 0 : state.selected === 3 ? 2 : state.selected);
-            } else if (e.key === 'ArrowDown') {
-                setSelected(state.selected === 0 ? 1 : state.selected === 2 ? 3 : state.selected);
-            }
-        },
-        { passive: false },
-    );
-
-    // Input: click/tap on quadrants
-    stage.addEventListener(
-        'pointerdown',
-        (e) => {
-            const rect = canvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
-            const left = x < rect.width / 2;
-            const top = y < rect.height / 2;
-
-            const pos = left ? (top ? 0 : 1) : top ? 2 : 3;
-            setSelected(pos);
-
-            if (overlay && !overlay.hidden && e.pointerType !== 'mouse') {
-                // on touch, allow quick start
-                startOrResume();
-            }
-        },
-        { passive: true },
-    );
-
-    // Input: explicit corner buttons
-    stage.querySelectorAll('[data-pos]').forEach((btn) => {
-        btn.addEventListener(
-            'click',
-            (e) => {
-                const pos = Number(e.currentTarget.getAttribute('data-pos'));
-                if (!Number.isNaN(pos)) setSelected(pos);
-                if (overlay && !overlay.hidden) startOrResume();
-            },
-            { passive: true },
-        );
-    });
-
-    // Pause when tab is hidden
-    document.addEventListener('visibilitychange', () => {
-        if (document.hidden && state.running) {
-            state.paused = true;
-            showOverlay({
-                title: 'Paused',
-                message: 'You switched tabs. Press Space to resume.',
-                buttonLabel: 'Resume',
-            });
-        }
-    });
-
-    // Overlay buttons
-    if (btnStart) {
-        btnStart.addEventListener('click', startOrResume, { passive: true });
-    }
-    if (btnFocus) {
+    if (btnStart) btnStart.addEventListener('click', startOrResume, { passive: true });
+    if (btnFocus)
         btnFocus.addEventListener(
             'click',
             () => {
@@ -679,18 +630,166 @@
             },
             { passive: true },
         );
-    }
 
-    // Initial state
+    // ---- Game loop ----
+    const step = (dt) => {
+        // speed ramps with progress (but keep tasteful)
+        const progressPct = clamp(state.distance / GOAL_DISTANCE, 0, 1);
+        state.speedTarget = 22 + progressPct * 18;
+        state.speed = lerp(state.speed, state.speedTarget, 0.04);
+
+        // budget drains as time passes
+        state.budget -= dt * BUDGET_DRAIN_PER_SEC;
+
+        // progress
+        state.distance += dt * state.speed;
+
+        // show gate near the end
+        if (state.distance > GOAL_DISTANCE * 0.82) {
+            gateGroup.visible = true;
+            gate.position.z = -32 - (GOAL_DISTANCE - state.distance) * 0.05;
+            gate.material.opacity = 0.6 + 0.35 * Math.sin(state.distance * 0.02);
+        }
+
+        if (state.distance >= GOAL_DISTANCE) {
+            win();
+            return;
+        }
+
+        if (state.budget <= 0) {
+            state.budget = 0;
+            lose();
+            return;
+        }
+
+        // spawn timers
+        state.spawnObstacleT -= dt;
+        if (state.spawnObstacleT <= 0) spawnObstacle();
+        state.spawnPickupT -= dt;
+        if (state.spawnPickupT <= 0) spawnPickup();
+
+        // lane movement (smooth)
+        state.lane = state.laneTarget;
+        const target = lanes[state.laneTarget];
+        focusSphere.position.x = lerp(focusSphere.position.x, target.x, 0.16);
+        focusSphere.position.y = lerp(focusSphere.position.y, target.y, 0.16);
+        focusGlow.position.copy(focusSphere.position);
+
+        // slight lean with motion
+        const tiltX = (target.y - focusSphere.position.y) * 0.2;
+        const tiltY = (focusSphere.position.x - target.x) * 0.2;
+        focusSphere.rotation.x = lerp(focusSphere.rotation.x, tiltX, 0.12);
+        focusSphere.rotation.y = lerp(focusSphere.rotation.y, tiltY, 0.12);
+        focusSphere.rotation.z += dt * 1.8;
+
+        // move tunnel texture for speed illusion
+        if (tunnelTex && !reducedMotion) {
+            tunnelTex.offset.y -= dt * (state.speed * 0.022);
+        }
+
+        // pulse light + run light wobble
+        const pulse = reducedMotion ? 0 : Math.sin(state.distance * 0.05) * 0.35;
+        pulseLight.intensity = 0.55 + pulse;
+        pulseLight.position.z = -28 - (reducedMotion ? 0 : Math.sin(state.distance * 0.02) * 4);
+        runLight.intensity = 0.95 + (reducedMotion ? 0 : Math.sin(state.distance * 0.08) * 0.12);
+
+        // Particles
+        const attr = particles.geometry.getAttribute('position');
+        const pos = attr.array;
+        const dz = dt * state.speed * (reducedMotion ? 0.6 : 1.0);
+        for (let i = 0; i < pos.length; i += 3) {
+            pos[i + 2] += dz;
+            if (pos[i + 2] > 10) {
+                pos[i + 2] = rand(-120, -60);
+                const a = Math.random() * Math.PI * 2;
+                const r = rand(0.8, 5.2);
+                pos[i + 0] = Math.cos(a) * r;
+                pos[i + 1] = Math.sin(a) * r;
+            }
+        }
+        attr.needsUpdate = true;
+
+        // Move sprites toward player and handle collision
+        const hitZ = 1.1;
+        const despawnZ = 6.5;
+
+        for (let i = state.pickups.length - 1; i >= 0; i--) {
+            const p = state.pickups[i];
+            p.position.z += dt * state.speed;
+            p.material.rotation += dt * 1.3;
+            p.scale.setScalar(1.0 + (reducedMotion ? 0 : Math.sin((state.distance + i) * 0.04) * 0.05));
+            if (!p.userData.hit && p.position.z >= hitZ && p.userData.lane === state.laneTarget) {
+                p.userData.hit = true;
+                state.budget = Math.min(99, state.budget + CLOCK_PICKUP_BONUS);
+                playShake(0.3);
+                hud();
+                scene.remove(p);
+                state.pickups.splice(i, 1);
+                continue;
+            }
+            if (p.position.z >= despawnZ) {
+                scene.remove(p);
+                state.pickups.splice(i, 1);
+            }
+        }
+
+        for (let i = state.objects.length - 1; i >= 0; i--) {
+            const o = state.objects[i];
+            o.position.z += dt * state.speed;
+            o.material.rotation -= dt * 0.9;
+            o.scale.setScalar(1.15 + (reducedMotion ? 0 : Math.sin((state.distance + i) * 0.05) * 0.07));
+            if (!o.userData.hit && o.position.z >= hitZ && o.userData.lane === state.laneTarget) {
+                o.userData.hit = true;
+                state.hits += 1;
+                state.budget -= HIT_PENALTY;
+                playShake(1.0);
+                hud();
+                scene.remove(o);
+                state.objects.splice(i, 1);
+                continue;
+            }
+            if (o.position.z >= despawnZ) {
+                scene.remove(o);
+                state.objects.splice(i, 1);
+            }
+        }
+
+        hud();
+    };
+
+    const render = (dt) => {
+        // Camera subtle movement
+        const baseZ = 6.4;
+        const shake = Math.max(0, state.cameraShake);
+        state.cameraShake = Math.max(0, state.cameraShake - dt * 2.6);
+
+        const wob = reducedMotion ? 0 : Math.sin(state.distance * 0.02) * 0.06;
+        camera.position.x = lerp(camera.position.x, focusSphere.position.x * 0.08, 0.06) + rand(-0.02, 0.02) * shake;
+        camera.position.y = lerp(camera.position.y, 0.35 + focusSphere.position.y * 0.08 + wob, 0.06) + rand(-0.02, 0.02) * shake;
+        camera.position.z = lerp(camera.position.z, baseZ, 0.06);
+        camera.lookAt(0, 0, -18);
+
+        renderer.render(scene, camera);
+    };
+
+    const loop = (ts) => {
+        if (!state.lastTs) state.lastTs = ts;
+        const rawDt = (ts - state.lastTs) / 1000;
+        state.lastTs = ts;
+        const dt = clamp(rawDt, 0, 0.05);
+
+        if (state.running && !state.paused) step(dt);
+        render(dt);
+        requestAnimationFrame(loop);
+    };
+
+    // Initial overlay
     canvas.setAttribute('tabindex', '0');
-    setSelected(3);
-    updateHud();
     showOverlay({
-        title: 'TimeCatch',
-        message: 'Catch the time tokens by rotating the clock hand to the correct corner.',
+        title: 'Focus Sphere: Distraction Dodger',
+        message: 'Run the time tunnel. Collect clocks to refill your Time Budget. Avoid distractions.',
         buttonLabel: 'Start',
     });
-    draw(0);
     requestAnimationFrame(loop);
 })();
 
