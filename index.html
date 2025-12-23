@@ -1,37 +1,191 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
     <head>
-        <meta charset="UTF-8">
-        <title>TimeCamp SA Investor Portal</title>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>TimeCamp S.A. — Investor Relations Portal</title>
+        <meta name="description" content="Secure investor relations portal for TimeCamp S.A." />
+
+        <link rel="preload" href="./assets/colorLogo.svg" as="image" />
+        <link rel="preload" href="./assets/colorIcon.png" as="image" />
+        <link rel="stylesheet" href="./styles.css" />
     </head>
-    <body style="background-color: #eee;">
-        <div style="margin: 100px; font-size: 16px; color: #333; line-height: 1.7em;
-                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-            <b>TimeCamp S.A.</b><br />
-            al. Wiśniowa 36a lok. 311<br />
-            53-137 Wrocław<br />
-            NIP: 8943003832<br />
-            wpisaną do rejestru przedsiębiorców Krajowego Rejestru Sądowego prowadzonego przez Sąd Rejonowy dla Wrocławia Fabrycznej VI Wydział Gospodarczy Krajowego Rejestru Sądowego pod nr KRS 0000360527
-            <br />
-            
-            <br />
+    <body>
+        <div class="app">
+            <main class="left" aria-label="Investor portal information">
+                <div class="left-card">
+                    <img src="./assets/colorLogo.svg" alt="TimeCamp" class="brand-logo" />
 
-            <img src="https://www.freelogovectors.net/wp-content/uploads/2021/11/timecamp_logo-freelogovectors.net_.png" style="width: 150px;" /><br /><br />
-            
-            <b>Welcome to investors portal</b><br /><br />
+                    <h1>Investor Relations Portal</h1>
+                    <p class="subtitle">
+                        Welcome to the TimeCamp S.A. secure investor portal — your gateway to company updates,
+                        financial reports, and statutory information.
+                    </p>
 
-            <div style="max-width: 340px;">
-                When you click the button below, you will be redirected to 
-                invite only portal for stakeholders with information 
-                required by law. 
-            </div>
+                    <div class="cta-section">
+                        <p class="cta-text">
+                            Access exclusive stakeholder resources, regulatory disclosures, and investor materials
+                            in our dedicated portal. This is a secure, invite-only environment for authorized
+                            shareholders and stakeholders.
+                        </p>
 
-            <a href="https://docs.google.com/document/d/1lxjpN7oNwziAjXfxvXXkjMmdoz2UrfUmA6JKJMGaJOE/edit#heading=h.6jre2s4bwx6t" style="padding: 10px 20px; border: 0px solid 55b761; background-color: #55b761; border-radius: 10px; margin-bottom: 10px; 
-            color: white; text-decoration: none; display: inline-block; margin-top: 20px;;">
-                Open investor relationship page...
-            </a><br />
-            <small>* you need login and password provided by TimeCamp SA</small><br /><br />
-            <small><a style="color: gray; text-decoration: none; opacity: 0.5;" href="https://github.com/timecamp-org/timecamp-website-investor">[edit]</a></small>
+                        <a
+                            href="https://docs.google.com/document/d/1lxjpN7oNwziAjXfxvXXkjMmdoz2UrfUmA6JKJMGaJOE/edit#heading=h.6jre2s4bwx6t"
+                            class="btn btn-primary"
+                        >
+                            Access Investor Portal
+                        </a>
+
+                        <p class="notice">Authentication required — credentials provided by TimeCamp S.A.</p>
+                    </div>
+
+                    <div class="company-info">
+                        <h2>Company Information</h2>
+                        <div class="company-details">
+                            <strong>TimeCamp S.A.</strong><br />
+                            al. Wiśniowa 36a lok. 311<br />
+                            53-137 Wrocław, Poland<br />
+                            <br />
+                            <strong>NIP:</strong> 8943003832<br />
+                            <strong>KRS:</strong> 0000360527<br />
+                            <br />
+                            Registered in the National Court Register maintained by the District Court for
+                            Wrocław-Fabryczna, 6th Commercial Division
+                        </div>
+                    </div>
+
+                    <div class="footer">
+                        <a
+                            href="https://github.com/timecamp-org/timecamp-website-investor"
+                            class="edit-link"
+                        >
+                            Edit on GitHub
+                        </a>
+                    </div>
+                </div>
+            </main>
+
+            <aside class="right" aria-label="Interactive time mini-game">
+                <div class="game-shell">
+                    <header class="game-top">
+                        <div class="game-brand">
+                            <img
+                                src="./assets/colorIcon.png"
+                                alt=""
+                                class="game-brand-icon"
+                                width="44"
+                                height="44"
+                            />
+                            <div class="game-brand-text">
+                                <div class="game-name">TimeCatch</div>
+                                <div class="game-tagline">Save time. Don’t drop it.</div>
+                            </div>
+                        </div>
+
+                        <div class="game-stats" aria-label="Game stats">
+                            <div class="stat">
+                                <div class="stat-label">Saved</div>
+                                <div class="stat-value" id="stat-saved">0s</div>
+                            </div>
+                            <div class="stat">
+                                <div class="stat-label">Streak</div>
+                                <div class="stat-value" id="stat-streak">0</div>
+                            </div>
+                            <div class="stat">
+                                <div class="stat-label">Lives</div>
+                                <div class="stat-value" id="stat-lives">3</div>
+                            </div>
+                            <div class="stat stat-clock">
+                                <div class="stat-label">Time</div>
+                                <div class="stat-value" id="stat-clock">--:--</div>
+                            </div>
+                        </div>
+                    </header>
+
+                    <div class="game-stage" id="game-stage">
+                        <canvas id="game-canvas" class="game-canvas"></canvas>
+
+                        <div class="game-overlay" id="game-overlay">
+                            <div
+                                class="overlay-card"
+                                role="dialog"
+                                aria-modal="true"
+                                aria-labelledby="overlay-title"
+                            >
+                                <h2 id="overlay-title">TimeCatch</h2>
+                                <p id="overlay-message" class="overlay-message">
+                                    Catch the time tokens by rotating the clock hand to the correct corner.
+                                </p>
+
+                                <ul class="overlay-list">
+                                    <li><strong>Arrow keys</strong> move the hand</li>
+                                    <li><strong>Space</strong> pause/resume</li>
+                                    <li><strong>Click/tap</strong> a quadrant (mobile)</li>
+                                </ul>
+
+                                <div class="overlay-actions">
+                                    <button class="btn btn-primary" id="btn-start" type="button">
+                                        Start
+                                    </button>
+                                    <button class="btn btn-ghost" id="btn-focus" type="button">
+                                        Focus canvas
+                                    </button>
+                                </div>
+
+                                <p class="overlay-note">
+                                    A TimeCamp-themed, original mini-game inspired by retro handheld “catch”
+                                    classics.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="game-corner-buttons" aria-label="Position controls">
+                            <button
+                                class="corner corner-tl"
+                                data-pos="0"
+                                type="button"
+                                aria-label="Top left position"
+                            >
+                                ↖
+                            </button>
+                            <button
+                                class="corner corner-bl"
+                                data-pos="1"
+                                type="button"
+                                aria-label="Bottom left position"
+                            >
+                                ↙
+                            </button>
+                            <button
+                                class="corner corner-tr"
+                                data-pos="2"
+                                type="button"
+                                aria-label="Top right position"
+                            >
+                                ↗
+                            </button>
+                            <button
+                                class="corner corner-br"
+                                data-pos="3"
+                                type="button"
+                                aria-label="Bottom right position"
+                            >
+                                ↘
+                            </button>
+                        </div>
+                    </div>
+
+                    <footer class="game-bottom">
+                        <div class="game-hint" id="game-hint">
+                            Tip: Keep a streak — the pace ramps up as time goes on.
+                        </div>
+                    </footer>
+                </div>
+            </aside>
         </div>
+
+        <script src="./game.js" defer></script>
     </body>
 </html>
+
+
